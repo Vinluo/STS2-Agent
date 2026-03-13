@@ -11,18 +11,18 @@ This file is not a gameplay guide. It is a lookup order for agents using the MCP
 ## Recommended Mapping
 
 - `combat.hand[].card_id` or `run.deck[].card_id`
-  - [cards.md](/Users/chart/Documents/project/sp/docs/game-knowledge/cards.md)
-  - [card-behaviors.md](/Users/chart/Documents/project/sp/docs/game-knowledge/card-behaviors.md)
+  - [cards.md](<repo-root>/docs/game-knowledge/cards.md)
+  - [card-behaviors.md](<repo-root>/docs/game-knowledge/card-behaviors.md)
 - `combat.enemies[].enemy_id`
-  - [monsters.md](/Users/chart/Documents/project/sp/docs/game-knowledge/monsters.md)
-  - [monster-behaviors.md](/Users/chart/Documents/project/sp/docs/game-knowledge/monster-behaviors.md)
+  - [monsters.md](<repo-root>/docs/game-knowledge/monsters.md)
+  - [monster-behaviors.md](<repo-root>/docs/game-knowledge/monster-behaviors.md)
 - `event.event_id`
-  - [events.md](/Users/chart/Documents/project/sp/docs/game-knowledge/events.md)
+  - [events.md](<repo-root>/docs/game-knowledge/events.md)
 - `run.potions[].potion_id`
-  - [potions.md](/Users/chart/Documents/project/sp/docs/game-knowledge/potions.md)
-  - [potion-behaviors.md](/Users/chart/Documents/project/sp/docs/game-knowledge/potion-behaviors.md)
+  - [potions.md](<repo-root>/docs/game-knowledge/potions.md)
+  - [potion-behaviors.md](<repo-root>/docs/game-knowledge/potion-behaviors.md)
 - character opening state
-  - [characters.md](/Users/chart/Documents/project/sp/docs/game-knowledge/characters.md)
+  - [characters.md](<repo-root>/docs/game-knowledge/characters.md)
 
 ## Decision Notes
 

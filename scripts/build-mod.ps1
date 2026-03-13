@@ -1,11 +1,15 @@
 param(
     [string]$Configuration = "Debug",
-    [string]$ProjectRoot = "C:/Users/chart/Documents/project/sp",
+    [string]$ProjectRoot = (Join-Path $PSScriptRoot ".."),
     [string]$GameRoot = "C:/Program Files (x86)/Steam/steamapps/common/Slay the Spire 2",
-    [string]$GodotExe = "C:/Users/chart/AppData/Local/Microsoft/WinGet/Packages/GodotEngine.GodotEngine.Mono_Microsoft.Winget.Source_8wekyb3d8bbwe/Godot_v4.5.1-stable_mono_win64/Godot_v4.5.1-stable_mono_win64_console.exe"
+    [string]$GodotExe = (if ($env:GODOT_BIN) { $env:GODOT_BIN } else { "" })
 )
 
 $ErrorActionPreference = "Stop"
+
+if ([string]::IsNullOrEmpty($GodotExe)) {
+    throw "Godot executable not found. Pass -GodotExe or set the GODOT_BIN environment variable."
+}
 
 $modName = "STS2AIAgent"
 $modProject = Join-Path $ProjectRoot "STS2AIAgent/STS2AIAgent.csproj"

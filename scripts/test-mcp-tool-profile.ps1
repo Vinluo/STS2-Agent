@@ -1,5 +1,5 @@
 param(
-    [string]$RepoRoot = "C:/Users/chart/Documents/project/sp"
+    [string]$RepoRoot = (Join-Path $PSScriptRoot "..")
 )
 
 $ErrorActionPreference = "Stop"

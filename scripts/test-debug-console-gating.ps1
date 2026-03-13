@@ -3,7 +3,7 @@ param(
     [int]$Attempts = 40,
     [int]$DelaySeconds = 2,
     [string]$Command = "help",
-    [string]$ProjectRoot = "C:/Users/chart/Documents/project/sp",
+    [string]$ProjectRoot = (Join-Path $PSScriptRoot ".."),
     [switch]$EnableDebugActions
 )
 

@@ -126,7 +126,7 @@ print(evt)
 
 如果上层 agent 支持 Codex Skill，推荐同时加载：
 
-- [sts2-mcp-player](/Users/chart/Documents/project/sp/skills/sts2-mcp-player/SKILL.md)
+- [sts2-mcp-player](<repo-root>/skills/sts2-mcp-player/SKILL.md)
 
 这个 skill 会强制 agent 采用“状态优先、按房间推进、只用可用动作”的工作流，能明显减少误调用和索引漂移。
 
@@ -162,7 +162,7 @@ print(evt)
 ## 本地启动
 
 ```powershell
-cd "C:/Users/chart/Documents/project/sp/mcp_server"
+cd "<repo-root>/mcp_server"
 uv sync
 uv run sts2-mcp-server
 ```
@@ -174,14 +174,14 @@ uv run sts2-mcp-server
 启动游戏并保持运行：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File "C:/Users/chart/Documents/project/sp/scripts/start-game-session.ps1" -EnableDebugActions
+powershell -ExecutionPolicy Bypass -File "<repo-root>/scripts/start-game-session.ps1" -EnableDebugActions
 ```
 
 验证 debug 工具默认关闭 / 显式开启：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File "C:/Users/chart/Documents/project/sp/scripts/test-debug-console-gating.ps1"
-powershell -ExecutionPolicy Bypass -File "C:/Users/chart/Documents/project/sp/scripts/test-debug-console-gating.ps1" -EnableDebugActions
+powershell -ExecutionPolicy Bypass -File "<repo-root>/scripts/test-debug-console-gating.ps1"
+powershell -ExecutionPolicy Bypass -File "<repo-root>/scripts/test-debug-console-gating.ps1" -EnableDebugActions
 ```
 
 ## 快速自检
@@ -189,24 +189,24 @@ powershell -ExecutionPolicy Bypass -File "C:/Users/chart/Documents/project/sp/sc
 只验证 Python 包装层可导入：
 
 ```powershell
-cd "C:/Users/chart/Documents/project/sp/mcp_server"
+cd "<repo-root>/mcp_server"
 uv run python -c "from sts2_mcp.server import create_server; create_server(); print('MCP_IMPORT_OK')"
 ```
 
 在 Mod 已运行时读取状态：
 
 ```powershell
-cd "C:/Users/chart/Documents/project/sp/mcp_server"
+cd "<repo-root>/mcp_server"
 uv run python -c "from sts2_mcp.client import Sts2Client; import json; print(json.dumps(Sts2Client().get_state(), ensure_ascii=False, indent=2))"
 ```
 
 ## 发布前最低要求
 
 ```powershell
-dotnet build "C:/Users/chart/Documents/project/sp/STS2AIAgent/STS2AIAgent.csproj" -c Release
-python -m py_compile "C:/Users/chart/Documents/project/sp/mcp_server/src/sts2_mcp/client.py" "C:/Users/chart/Documents/project/sp/mcp_server/src/sts2_mcp/server.py"
-cd "C:/Users/chart/Documents/project/sp/mcp_server"
+dotnet build "<repo-root>/STS2AIAgent/STS2AIAgent.csproj" -c Release
+python -m py_compile "<repo-root>/mcp_server/src/sts2_mcp/client.py" "<repo-root>/mcp_server/src/sts2_mcp/server.py"
+cd "<repo-root>/mcp_server"
 uv run python -c "from sts2_mcp.server import create_server; create_server(); print('MCP_IMPORT_OK')"
 ```
 
-完整发布清单见 [release-readiness.md](/Users/chart/Documents/project/sp/docs/release-readiness.md)。
+完整发布清单见 [release-readiness.md](<repo-root>/docs/release-readiness.md)。

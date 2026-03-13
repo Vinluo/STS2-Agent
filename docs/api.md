@@ -1245,7 +1245,7 @@
 | 阻塞弹窗 | `modal` / `confirm_modal` / `dismiss_modal` | 已实现，待实机验证 |
 | 游戏结束 | `game_over` / `return_to_main_menu` | 已实现，待实机验证 |
 
-新增字段与动作的详细说明见 [phase-5-full-chain.md](/C:/Users/chart/Documents/project/sp/docs/phase-5-full-chain.md)。
+新增字段与动作的详细说明见 [phase-5-full-chain.md](/<repo-root>/docs/phase-5-full-chain.md)。
 
 ### Debug 动作
 

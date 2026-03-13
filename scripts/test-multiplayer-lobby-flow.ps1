@@ -1,5 +1,5 @@
 param(
-    [string]$ProjectRoot = "C:/Users/chart/Documents/project/sp",
+    [string]$ProjectRoot = (Join-Path $PSScriptRoot ".."),
     [int]$HostApiPort = 8080,
     [int]$ClientApiPort = 8081,
     [switch]$KeepGamesRunning

@@ -1,5 +1,5 @@
 param(
-    [string]$ProjectRoot = "C:/Users/chart/Documents/project/sp",
+    [string]$ProjectRoot = (Join-Path $PSScriptRoot ".."),
     [string]$Configuration = "Release",
     [string]$OutputRoot = ""
 )
