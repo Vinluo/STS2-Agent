@@ -280,6 +280,7 @@ def create_server(client: Sts2Client | None = None, tool_profile: str | None = N
         card_index: int | None = None,
         target_index: int | None = None,
         option_index: int | None = None,
+        mode: str | None = None,
     ) -> dict[str, Any]:
         """Execute one currently available game action through the compact tool surface.
 
@@ -303,6 +304,7 @@ def create_server(client: Sts2Client | None = None, tool_profile: str | None = N
             - Use `option_index` for map, reward, shop, event, rest, selection,
               and multiplayer-lobby actions.
             - Use `target_index` only when the latest state marks a card or potion as `requires_target=true`.
+            - Optional `mode` can be `stable` (default) or `instant` (returns without waiting for stable transitions).
             - Read `target_index_space` and `valid_target_indices` from state to know whether `target_index`
               refers to `combat.enemies[]` or `combat.players[]`.
             - `run_console_command` is intentionally excluded from this compact tool.
@@ -316,6 +318,7 @@ def create_server(client: Sts2Client | None = None, tool_profile: str | None = N
             card_index=card_index,
             target_index=target_index,
             option_index=option_index,
+            mode=mode,
             client_context={
                 "source": "mcp",
                 "tool_name": "act",

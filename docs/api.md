@@ -83,6 +83,8 @@
 | `completed` | 动作已完成，返回的 `state` 已稳定 |
 | `pending` | 动作已提交，但游戏状态尚在过渡中（等待动画/队列清空） |
 
+`POST /action` 支持可选 `mode="instant"`。在该模式下服务端不会阻塞等待稳定态，通常会更快返回 `pending`，并尝试把游戏 `FastMode` 切到 `Instant`（视觉上尽量跳过动画）。
+
 ---
 
 ## `GET /health`
@@ -837,6 +839,7 @@
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `action` | string | **必填**。动作名称 |
+| `mode` | string \| null | 可选执行模式：`stable`（默认）或 `instant`（不等待稳定态，立即返回，并启用视觉快进） |
 | `card_index` | number \| null | 手牌索引（`play_card` 时使用） |
 | `target_index` | number \| null | 目标索引（需要指定目标的卡牌使用） |
 | `option_index` | number \| null | 选项索引（地图/奖励/选牌等使用） |

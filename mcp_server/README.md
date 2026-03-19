@@ -187,6 +187,10 @@ print(evt)
   - 默认：未设置 / `0`
   - 作用：启用开发期 debug 工具，例如 `run_console_command`
   - 发布建议：保持关闭
+- `STS2_ACTION_MODE`
+  - 默认：`stable`
+  - 可选：`stable` / `instant`
+  - 作用：为 `act` 与 legacy action tools 设置默认执行模式；`instant` 会跳过服务端稳定态等待，通常更快返回 `pending`，并尝试切到游戏内 `FastMode=Instant`
 
 ## 运行时知识库
 

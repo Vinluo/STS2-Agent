@@ -37,6 +37,7 @@ _DEFAULT_READ_TIMEOUT = 10.0
 _DEFAULT_ACTION_TIMEOUT = 30.0
 _DEFAULT_MAX_RETRIES = 2
 _RETRY_BACKOFF_BASE = 0.5
+_ACTION_MODES = {"stable", "instant"}
 
 
 @dataclass(slots=True)
@@ -68,6 +69,7 @@ class Sts2Client:
         self._read_timeout = read_timeout or float(os.getenv("STS2_API_READ_TIMEOUT", str(_DEFAULT_READ_TIMEOUT)))
         self._action_timeout = action_timeout or float(os.getenv("STS2_API_ACTION_TIMEOUT", str(_DEFAULT_ACTION_TIMEOUT)))
         self._max_retries = max_retries if max_retries is not None else int(os.getenv("STS2_API_MAX_RETRIES", str(_DEFAULT_MAX_RETRIES)))
+        self._default_action_mode = self._normalize_action_mode(os.getenv("STS2_ACTION_MODE"), strict=False)
 
     @property
     def base_url(self) -> str:
@@ -580,8 +582,11 @@ class Sts2Client:
         target_index: int | None = None,
         option_index: int | None = None,
         command: str | None = None,
+        mode: str | None = None,
         client_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        effective_mode = self._default_action_mode if mode is None else self._normalize_action_mode(mode, strict=True)
+
         return self._request(
             "POST",
             "/action",
@@ -591,10 +596,30 @@ class Sts2Client:
                 "target_index": target_index,
                 "option_index": option_index,
                 "command": command,
+                "mode": effective_mode,
                 "client_context": client_context,
             },
             is_action=True,
         )
+
+    @staticmethod
+    def _normalize_action_mode(mode: str | None, *, strict: bool) -> str | None:
+        if mode is None:
+            return None
+
+        normalized = mode.strip().lower()
+        if not normalized:
+            return None
+
+        if normalized in _ACTION_MODES:
+            return normalized
+
+        message = f"Invalid action mode '{mode}'. Expected one of: stable, instant."
+        if strict:
+            raise ValueError(message)
+
+        logger.warning("%s Ignoring value from environment.", message)
+        return None
 
     def _request(
         self,
