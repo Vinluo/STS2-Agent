@@ -44,7 +44,25 @@ internal static class Router
                         mod_version = ModVersion,
                         protocol_version = ProtocolVersion,
                         game_version = ReleaseInfoManager.Instance.ReleaseInfo?.Version ?? "unknown",
-                        status = "ready"
+                        status = "ready",
+                        default_action_mode = GameActionService.GetDefaultExecutionMode()
+                    }
+                });
+                statusCode = 200;
+                return;
+            }
+
+            if (request.HttpMethod.Equals("GET", StringComparison.OrdinalIgnoreCase) &&
+                request.Url?.AbsolutePath == "/action-mode")
+            {
+                await WriteJsonAsync(response, 200, new
+                {
+                    ok = true,
+                    request_id = requestId,
+                    data = new
+                    {
+                        default_action_mode = GameActionService.GetDefaultExecutionMode(),
+                        supported_modes = new[] { "stable", "instant" }
                     }
                 });
                 statusCode = 200;
@@ -101,6 +119,29 @@ internal static class Router
                     ok = true,
                     request_id = requestId,
                     data = actionResponse
+                });
+                statusCode = 200;
+                return;
+            }
+
+            if (request.HttpMethod.Equals("POST", StringComparison.OrdinalIgnoreCase) &&
+                request.Url?.AbsolutePath == "/action-mode")
+            {
+                var modeRequest = await JsonHelper.DeserializeAsync<ActionModeRequest>(request.InputStream, cancellationToken);
+                if (string.IsNullOrWhiteSpace(modeRequest?.mode))
+                {
+                    throw new ApiException(400, "invalid_request", "Request body must contain a mode field.");
+                }
+
+                var mode = GameActionService.SetDefaultExecutionMode(modeRequest.mode);
+                await WriteJsonAsync(response, 200, new
+                {
+                    ok = true,
+                    request_id = requestId,
+                    data = new
+                    {
+                        default_action_mode = mode
+                    }
                 });
                 statusCode = 200;
                 return;
@@ -250,5 +291,10 @@ internal static class Router
     {
         var bytes = Encoding.UTF8.GetBytes(text);
         return response.OutputStream.WriteAsync(bytes);
+    }
+
+    private sealed class ActionModeRequest
+    {
+        public string? mode { get; init; }
     }
 }

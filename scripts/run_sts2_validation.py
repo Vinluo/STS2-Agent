@@ -1350,6 +1350,9 @@ def suite_mcp_tool_profile(_: argparse.Namespace) -> dict[str, Any]:
         "wait_for_event",
         "wait_until_actionable",
         "act",
+        "get_game_data_item",
+        "get_game_data_items",
+        "get_relevant_game_data",
     }
     guided_debug_tools = essential_tools | {"run_console_command"}
     legacy_action_tools = {
@@ -1668,6 +1671,108 @@ def suite_new_run_lifecycle(args: argparse.Namespace) -> dict[str, Any]:
         "embark_destination": run_state.get("screen"),
         "game_over_actions": list(game_over_state.get("available_actions") or []),
         "final_menu_actions": list(final_menu_state.get("available_actions") or []),
+    }
+
+
+def suite_instant_mode_smoke(args: argparse.Namespace) -> dict[str, Any]:
+    client = ApiClient(
+        base_url=args.base_url,
+        timeout=args.timeout_sec,
+        retries=args.request_retries,
+        retry_delay_ms=args.retry_delay_ms,
+    )
+    client.request("GET", "/health")
+
+    def ensure_instant_response(response: dict[str, Any], label: str) -> dict[str, Any]:
+        action_response = ensure_action_ok(response, label)["data"]
+        status = str(action_response.get("status") or "")
+        stable = action_response.get("stable")
+        mode = str(action_response.get("mode") or "")
+
+        if status not in {"completed", "pending"}:
+            raise ValidationError(f"{label} should return status=completed|pending, but received: {json.dumps(response, ensure_ascii=False)}")
+        if not isinstance(stable, bool):
+            raise ValidationError(f"{label} should return a boolean stable field, but received: {json.dumps(response, ensure_ascii=False)}")
+        if mode != "instant":
+            raise ValidationError(f"{label} should return mode=instant, but received: {json.dumps(response, ensure_ascii=False)}")
+        if status == "completed" and not stable:
+            raise ValidationError(f"{label} returned completed with stable=false: {json.dumps(response, ensure_ascii=False)}")
+        if status == "pending" and stable:
+            raise ValidationError(f"{label} returned pending with stable=true: {json.dumps(response, ensure_ascii=False)}")
+
+        return action_response
+
+    state = client.wait_for_state(
+        "MAIN_MENU entry point for instant mode smoke",
+        lambda current: current.get("screen") == "MAIN_MENU"
+        and (
+            "open_character_select" in list(current.get("available_actions") or [])
+            or "abandon_run" in list(current.get("available_actions") or [])
+        ),
+        attempts=args.poll_attempts,
+        delay_ms=args.poll_delay_ms,
+    )
+
+    if "abandon_run" in list(state.get("available_actions") or []):
+        modal_response = ensure_action_ok(client.action("abandon_run"), "abandon_run")
+        modal_state = modal_response["data"]["state"]
+        assert_action_available(modal_state, "confirm_modal")
+        ensure_action_ok(client.action("confirm_modal"), "confirm_modal")
+        state = client.wait_for_state(
+            "MAIN_MENU without active run",
+            lambda current: current.get("screen") == "MAIN_MENU" and "open_character_select" in list(current.get("available_actions") or []),
+            attempts=args.poll_attempts,
+            delay_ms=args.poll_delay_ms,
+        )
+
+    assert_action_available(state, "open_character_select")
+    open_response = ensure_instant_response(
+        client.action("open_character_select", mode="instant"),
+        "open_character_select(mode=instant)",
+    )
+
+    character_select_state = client.wait_for_state(
+        "CHARACTER_SELECT after instant open_character_select",
+        lambda current: current.get("screen") == "CHARACTER_SELECT" and current.get("character_select") is not None,
+        attempts=args.poll_attempts,
+        delay_ms=args.poll_delay_ms,
+    )
+
+    selected_character = first_unlocked_character(character_select_state)
+    select_response = ensure_instant_response(
+        client.action("select_character", option_index=int(selected_character["index"]), mode="instant"),
+        f"select_character(mode=instant, option_index={selected_character['index']})",
+    )
+
+    can_embark_state = client.wait_for_state(
+        "character select can embark after instant select_character",
+        lambda current: current.get("screen") == "CHARACTER_SELECT"
+        and current.get("character_select") is not None
+        and bool(current["character_select"].get("can_embark")),
+        attempts=args.poll_attempts,
+        delay_ms=args.poll_delay_ms,
+    )
+
+    embark_response = ensure_instant_response(
+        client.action("embark", mode="instant"),
+        "embark(mode=instant)",
+    )
+
+    run_state = client.wait_for_state(
+        "leave CHARACTER_SELECT after instant embark",
+        lambda current: current.get("screen") != "CHARACTER_SELECT",
+        attempts=args.poll_attempts,
+        delay_ms=args.poll_delay_ms,
+    )
+
+    return {
+        "open_character_select_status": open_response["status"],
+        "select_character_status": select_response["status"],
+        "embark_status": embark_response["status"],
+        "embark_mode": embark_response["mode"],
+        "selected_character_id": selected_character["character_id"],
+        "character_select_actions": list(can_embark_state.get("available_actions") or []),
+        "run_entry_screen": run_state.get("screen"),
     }
 
 
@@ -2458,6 +2563,15 @@ def build_parser() -> argparse.ArgumentParser:
     new_run.add_argument("--request-retries", type=int, default=3)
     new_run.add_argument("--retry-delay-ms", type=int, default=500)
     new_run.set_defaults(func=suite_new_run_lifecycle)
+
+    instant_mode = subparsers.add_parser("instant-mode-smoke")
+    instant_mode.add_argument("--base-url", default="http://127.0.0.1:8080")
+    instant_mode.add_argument("--timeout-sec", type=float, default=15.0)
+    instant_mode.add_argument("--poll-attempts", type=int, default=120)
+    instant_mode.add_argument("--poll-delay-ms", type=int, default=250)
+    instant_mode.add_argument("--request-retries", type=int, default=3)
+    instant_mode.add_argument("--retry-delay-ms", type=int, default=500)
+    instant_mode.set_defaults(func=suite_instant_mode_smoke)
 
     combat_hand = subparsers.add_parser("combat-hand-confirm-flow")
     for name, (arg_type, kwargs) in common_api.items():

@@ -368,7 +368,7 @@ def process_alive(target_pid: int) -> bool:
         return False
 
 
-def port_owned_by_pid(target_port: int | None, target_pid: int) -> bool:
+def port_owned_by_pid(target_port, target_pid: int) -> bool:
     if target_port is None:
         return False
 

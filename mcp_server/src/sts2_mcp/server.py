@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
 import os
+import threading
+import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -11,6 +14,23 @@ from .handoff import Sts2HandoffService
 from .knowledge import Sts2KnowledgeBase
 
 ToolHandler = Callable[..., dict[str, Any]]
+
+JSON_FILE_EXTENSION = ".json"
+JSON_FILE_EXTENSION_LENGTH = len(JSON_FILE_EXTENSION)
+GAME_DATA_RELATIVE_PATH = ("..", "..", "data", "eng")
+KNOWN_ITEM_ID_KEYS = ("id", "ID", "Id")
+ITEM_IDS_SEPARATOR = ","
+
+SCENE_MENU = "menu"
+SCENE_COMBAT = "combat"
+SCENE_SHOP = "shop"
+SCENE_EVENT = "event"
+
+COMBAT_SCREEN_KEYWORDS = ("combat",)
+COMBAT_SCREEN_NAMES = {"combat_reward", "combat_victory"}
+SHOP_SCREEN_KEYWORDS = ("shop", "merchant")
+EVENT_SCREEN_KEYWORDS = ("event",)
+EVENT_SCREEN_NAMES = {"event_room", "ancient_event"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,8 +70,16 @@ _LEGACY_ACTION_TOOLS: tuple[ActionToolSpec, ...] = (
     ActionToolSpec("select_character", "option_index", "Pick a character on the character select screen."),
     ActionToolSpec("embark", "no_args", "Start the run from character select."),
     ActionToolSpec("unready", "no_args", "Cancel local ready status in a multiplayer character-select lobby."),
-    ActionToolSpec("increase_ascension", "no_args", "Increase the lobby ascension level when the local player is allowed to change it."),
-    ActionToolSpec("decrease_ascension", "no_args", "Decrease the lobby ascension level when the local player is allowed to change it."),
+    ActionToolSpec(
+        "increase_ascension",
+        "no_args",
+        "Increase the lobby ascension level when the local player is allowed to change it.",
+    ),
+    ActionToolSpec(
+        "decrease_ascension",
+        "no_args",
+        "Decrease the lobby ascension level when the local player is allowed to change it.",
+    ),
     ActionToolSpec("use_potion", "option_target", "Use a potion from the player's belt."),
     ActionToolSpec("discard_potion", "option_index", "Discard a potion from the player's belt."),
     ActionToolSpec("confirm_modal", "no_args", "Confirm the currently open modal."),
@@ -81,6 +109,227 @@ def _normalize_tool_profile(tool_profile: str | None) -> str:
 
 def _debug_tools_enabled() -> bool:
     return _env_flag("STS2_ENABLE_DEBUG_ACTIONS")
+
+
+_GAME_DATA_CACHE: dict[str, Any] | None = None
+_GAME_DATA_INDEXES: dict[str, dict[str, Any]] = {}
+_GAME_DATA_CACHE_LOCK = threading.Lock()
+_GAME_DATA_INDEXES_LOCK = threading.Lock()
+
+_SCENE_FIELD_SETS: dict[str, dict[str, list[str]]] = {
+    SCENE_COMBAT: {
+        "cards": [
+            "id",
+            "name",
+            "description",
+            "type",
+            "rarity",
+            "target",
+            "cost",
+            "is_x_cost",
+            "star_cost",
+            "is_x_star_cost",
+            "damage",
+            "block",
+            "keywords",
+            "tags",
+            "vars",
+            "upgrade",
+        ],
+        "monsters": [
+            "id",
+            "name",
+            "type",
+            "min_hp",
+            "max_hp",
+            "moves",
+            "damage_values",
+            "block_values",
+        ],
+        "powers": [
+            "id",
+            "name",
+            "description",
+            "type",
+            "stack_type",
+        ],
+    },
+    SCENE_SHOP: {
+        "cards": [
+            "id",
+            "name",
+            "description",
+            "type",
+            "rarity",
+            "cost",
+        ],
+        "relics": [
+            "id",
+            "name",
+            "description",
+            "rarity",
+            "pool",
+        ],
+        "potions": [
+            "id",
+            "name",
+            "description",
+            "rarity",
+        ],
+    },
+    SCENE_EVENT: {
+        "events": [
+            "id",
+            "name",
+            "description",
+            "options",
+        ],
+    },
+}
+
+
+def _get_game_data_dir() -> str:
+    here = os.path.dirname(__file__)
+    return os.path.abspath(os.path.join(here, *GAME_DATA_RELATIVE_PATH))
+
+
+def _load_game_data() -> dict[str, Any]:
+    global _GAME_DATA_CACHE
+    if _GAME_DATA_CACHE is not None:
+        return _GAME_DATA_CACHE
+
+    with _GAME_DATA_CACHE_LOCK:
+        if _GAME_DATA_CACHE is not None:
+            return _GAME_DATA_CACHE
+
+        data_dir = _get_game_data_dir()
+        if not os.path.isdir(data_dir):
+            raise RuntimeError(f"Game data directory not found: {data_dir!r}.")
+
+        data: dict[str, Any] = {}
+        for filename in sorted(os.listdir(data_dir)):
+            path = os.path.join(data_dir, filename)
+            if os.path.isdir(path):
+                continue
+            if not filename.lower().endswith(JSON_FILE_EXTENSION):
+                continue
+
+            key = filename[:-JSON_FILE_EXTENSION_LENGTH]
+            try:
+                with open(path, "r", encoding="utf-8") as file_handle:
+                    data[key] = json.load(file_handle)
+            except Exception as exc:
+                raise RuntimeError(f"Failed to load game data file {path!r}: {exc}") from exc
+
+        _GAME_DATA_CACHE = data
+        return data
+
+
+def _add_case_insensitive_item_id(index: dict[str, Any], item_id: str, item: Any) -> None:
+    normalized = item_id.strip()
+    if not normalized:
+        return
+
+    index[normalized] = item
+    index[normalized.upper()] = item
+    index[normalized.lower()] = item
+
+
+def _ensure_game_data_index(collection: str) -> dict[str, Any]:
+    global _GAME_DATA_INDEXES
+    if collection in _GAME_DATA_INDEXES:
+        return _GAME_DATA_INDEXES[collection]
+
+    with _GAME_DATA_INDEXES_LOCK:
+        if collection in _GAME_DATA_INDEXES:
+            return _GAME_DATA_INDEXES[collection]
+
+        data = _load_game_data()
+        if collection not in data:
+            raise KeyError(f"Unknown game data collection: {collection}")
+
+        items = data[collection]
+        if isinstance(items, dict):
+            index: dict[str, Any] = {}
+            for raw_id, item in items.items():
+                _add_case_insensitive_item_id(index=index, item_id=str(raw_id), item=item)
+        elif isinstance(items, list):
+            index = {}
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                item_id = ""
+                for key in KNOWN_ITEM_ID_KEYS:
+                    candidate = item.get(key)
+                    if candidate:
+                        item_id = str(candidate).strip()
+                        break
+                if not item_id:
+                    continue
+                _add_case_insensitive_item_id(index=index, item_id=item_id, item=item)
+        else:
+            raise TypeError(f"Unsupported data type for collection {collection!r}: {type(items)}")
+
+        _GAME_DATA_INDEXES[collection] = index
+        return index
+
+
+def _lookup_game_data_item(index: dict[str, Any], item_id: str) -> Any:
+    return index.get(item_id) or index.get(item_id.upper()) or index.get(item_id.lower())
+
+
+def _build_game_data_tool_error(collection: str, exc: Exception) -> dict[str, Any]:
+    if isinstance(exc, KeyError):
+        available_collections = sorted(_GAME_DATA_CACHE.keys()) if _GAME_DATA_CACHE else []
+        return {
+            "error": {
+                "type": "unknown_collection",
+                "collection": collection,
+                "message": str(exc),
+                "available_collections": available_collections,
+            }
+        }
+
+    if isinstance(exc, RuntimeError):
+        return {
+            "error": {
+                "type": "game_data_unavailable",
+                "collection": collection,
+                "message": str(exc),
+            }
+        }
+
+    return {
+        "error": {
+            "type": "invalid_game_data",
+            "collection": collection,
+            "message": str(exc),
+        }
+    }
+
+
+def get_game_data_items_fields(collection: str, item_ids: str, fields: str | None) -> dict[str, Any]:
+    if not item_ids:
+        return {}
+
+    index = _ensure_game_data_index(collection)
+    ids = [value.strip() for value in item_ids.split(ITEM_IDS_SEPARATOR) if value.strip()]
+    requested_fields = [value.strip() for value in fields.split(ITEM_IDS_SEPARATOR) if value.strip()] if fields else []
+
+    result: dict[str, Any] = {}
+    for item_id in ids:
+        item = _lookup_game_data_item(index=index, item_id=item_id)
+        if item is None:
+            result[item_id] = None
+            continue
+
+        if not requested_fields or not isinstance(item, dict):
+            result[item_id] = item
+            continue
+
+        result[item_id] = {key: item[key] for key in requested_fields if key in item}
+
+    return result
 
 
 def _register_no_arg_tool(mcp: FastMCP, name: str, description: str, handler: ToolHandler) -> None:
@@ -125,20 +374,28 @@ def _register_legacy_action_tools(mcp: FastMCP, sts2: Sts2Client) -> None:
         if spec.kind == "no_args":
             _register_no_arg_tool(mcp, spec.name, spec.description, handler)
             continue
-
         if spec.kind == "option_index":
             _register_option_index_tool(mcp, spec.name, spec.description, handler)
             continue
-
         if spec.kind == "card_target":
             _register_card_target_tool(mcp, spec.name, spec.description, handler)
             continue
-
         if spec.kind == "option_target":
             _register_option_target_tool(mcp, spec.name, spec.description, handler)
             continue
 
         raise RuntimeError(f"Unsupported action tool kind: {spec.kind}")
+
+
+def _detect_scene_from_screen(screen: str) -> str:
+    normalized = (screen or "").lower()
+    if any(keyword in normalized for keyword in COMBAT_SCREEN_KEYWORDS) or normalized in COMBAT_SCREEN_NAMES:
+        return SCENE_COMBAT
+    if any(keyword in normalized for keyword in SHOP_SCREEN_KEYWORDS):
+        return SCENE_SHOP
+    if any(keyword in normalized for keyword in EVENT_SCREEN_KEYWORDS) or normalized in EVENT_SCREEN_NAMES:
+        return SCENE_EVENT
+    return SCENE_MENU
 
 
 def create_server(client: Sts2Client | None = None, tool_profile: str | None = None) -> FastMCP:
@@ -148,10 +405,94 @@ def create_server(client: Sts2Client | None = None, tool_profile: str | None = N
     profile = _normalize_tool_profile(tool_profile)
     mcp = FastMCP("STS2 AI Agent")
 
-    def _agent_state() -> dict[str, Any]:
+    def _is_actionable_state(state: dict[str, Any]) -> bool:
+        actions = state.get("available_actions")
+        if not isinstance(actions, list):
+            actions = state.get("actions")
+        return isinstance(actions, list) and len(actions) > 0
+
+    def _wait_until_actionable_impl(
+        timeout_seconds: float,
+        *,
+        mode: str | None = None,
+        monotonic: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> dict[str, Any]:
+        timeout = max(0.1, float(timeout_seconds))
+        normalized_mode = (mode or "").strip().lower()
+        instant_mode = normalized_mode == "instant"
+        actionable_events = {
+            "player_action_window_opened",
+            "route_decision_required",
+            "reward_decision_required",
+            "available_actions_changed",
+            "screen_changed",
+        }
+
         state = sts2.get_state()
-        agent_view = state.get("agent_view")
-        return agent_view if isinstance(agent_view, dict) else state
+        if _is_actionable_state(state):
+            return {
+                "matched": False,
+                "event": None,
+                "state": state,
+                "actions": sts2.get_available_actions(),
+                "timeout_seconds": timeout,
+                "source": "state",
+                "mode": normalized_mode or None,
+            }
+
+        started_at = monotonic()
+        event: dict[str, Any] | None = None
+        source = "events"
+        event_wait_seconds = timeout
+        if instant_mode:
+            event_wait_seconds = min(
+                timeout,
+                max(0.1, float(os.getenv("STS2_MCP_INSTANT_EVENT_WAIT_SECONDS", "0.6"))),
+            )
+
+        try:
+            event = sts2.wait_for_event(event_names=actionable_events, timeout=event_wait_seconds)
+        except Exception:
+            event = None
+            source = "polling"
+
+        remaining = max(0.0, timeout - (monotonic() - started_at))
+        state = sts2.get_state()
+
+        if event is None and not _is_actionable_state(state) and remaining > 0:
+            source = "polling"
+            interval = max(
+                0.01,
+                float(
+                    os.getenv(
+                        "STS2_MCP_INSTANT_POLL_SECONDS" if instant_mode else "STS2_MCP_FALLBACK_POLL_SECONDS",
+                        "0.05" if instant_mode else "0.25",
+                    )
+                ),
+            )
+            deadline = monotonic() + remaining
+            baseline_signature = "|".join(sorted(str(name) for name in (state.get("available_actions") or [])))
+
+            while monotonic() < deadline:
+                sleep(interval)
+                state = sts2.get_state()
+                if _is_actionable_state(state):
+                    break
+
+                signature = "|".join(sorted(str(name) for name in (state.get("available_actions") or [])))
+                if signature != baseline_signature:
+                    break
+
+        return {
+            "matched": event is not None,
+            "event": event,
+            "state": state,
+            "actions": sts2.get_available_actions(),
+            "timeout_seconds": timeout,
+            "source": source,
+            "mode": normalized_mode or None,
+        }
 
     @mcp.tool
     def health_check() -> dict[str, Any]:
@@ -169,11 +510,6 @@ def create_server(client: Sts2Client | None = None, tool_profile: str | None = N
         return sts2.get_available_actions()
 
     if profile in {"full", "layered"}:
-        @mcp.tool
-        def get_agent_view() -> dict[str, Any]:
-            """Read the compact agent-facing game state snapshot."""
-            return _agent_state()
-
         @mcp.tool
         def get_planner_context(planner_note: str | None = None) -> dict[str, Any]:
             """Build a planner-focused snapshot with route branches and linked event knowledge."""
@@ -275,45 +611,93 @@ def create_server(client: Sts2Client | None = None, tool_profile: str | None = N
             )
 
     @mcp.tool
+    def get_game_data_item(collection: str, item_id: str) -> dict[str, Any] | None:
+        """Return a single item from a game metadata collection by id."""
+        if not item_id:
+            return None
+
+        try:
+            index = _ensure_game_data_index(collection)
+            return _lookup_game_data_item(index=index, item_id=item_id)
+        except (KeyError, RuntimeError, TypeError) as exc:
+            return _build_game_data_tool_error(collection=collection, exc=exc)
+
+    @mcp.tool
+    def get_game_data_items(collection: str, item_ids: str) -> dict[str, Any]:
+        """Return multiple items from a game metadata collection by comma-separated ids."""
+        if not item_ids:
+            return {}
+
+        try:
+            index = _ensure_game_data_index(collection)
+            ids = [value.strip() for value in item_ids.split(ITEM_IDS_SEPARATOR) if value.strip()]
+            return {item_id: _lookup_game_data_item(index=index, item_id=item_id) for item_id in ids}
+        except (KeyError, RuntimeError, TypeError) as exc:
+            return _build_game_data_tool_error(collection=collection, exc=exc)
+
+    @mcp.tool
+    def get_relevant_game_data(collection: str, item_ids: str) -> dict[str, Any]:
+        """Return scene-aware game metadata with only the most useful top-level fields."""
+        state = sts2.get_state()
+        screen = str(state.get("screen") or "")
+        scene = _detect_scene_from_screen(screen)
+
+        try:
+            suggested_fields = _SCENE_FIELD_SETS.get(scene, {}).get(collection)
+            if not suggested_fields:
+                return get_game_data_items(collection=collection, item_ids=item_ids)
+
+            return get_game_data_items_fields(
+                collection=collection,
+                item_ids=item_ids,
+                fields=",".join(suggested_fields),
+            )
+        except (KeyError, RuntimeError, TypeError) as exc:
+            return _build_game_data_tool_error(collection=collection, exc=exc)
+
+    @mcp.tool
+    def wait_for_event(event_names: str = "", timeout_seconds: float = 20.0) -> dict[str, Any]:
+        """Wait for one matching game event from `/events/stream`."""
+        timeout = max(0.1, float(timeout_seconds))
+        target_names = [name.strip() for name in event_names.split(",") if name.strip()]
+        event = sts2.wait_for_event(event_names=target_names or None, timeout=timeout)
+
+        if event is None:
+            return {
+                "matched": False,
+                "event": None,
+                "event_names": target_names,
+                "timeout_seconds": timeout,
+            }
+
+        return {
+            "matched": True,
+            "event": event,
+            "event_names": target_names,
+            "timeout_seconds": timeout,
+        }
+
+    @mcp.tool
+    def wait_until_actionable(timeout_seconds: float = 20.0, mode: str | None = None) -> dict[str, Any]:
+        """Wait until a new actionable phase is reported, then return fresh state."""
+        return _wait_until_actionable_impl(timeout_seconds, mode=mode)
+
+    @mcp.tool
     def act(
         action: str,
         card_index: int | None = None,
         target_index: int | None = None,
         option_index: int | None = None,
         mode: str | None = None,
+        wait_until_actionable_after_instant: bool = True,
+        settle_timeout_seconds: float = 5.0,
     ) -> dict[str, Any]:
-        """Execute one currently available game action through the compact tool surface.
-
-        Usage loop:
-            1. Call `get_game_state()` or `get_available_actions()`.
-            2. Branch on `state.session.mode` and `state.session.phase`.
-            3. Pick an action that is currently available.
-            4. Pass only the indices required by that action from the latest state.
-            5. Read state again after the action completes.
-
-        Compact-tool rules:
-            - Guided mode intentionally keeps the tool surface small: use this
-              single `act` tool for both singleplayer and multiplayer actions.
-            - Multiplayer never changes the control scope; you only control the
-              local player exposed by the latest state.
-            - Never guess actions from screen names alone. Only call names that
-              are present in `state.available_actions`.
-
-        Notes:
-            - Use `card_index` for `play_card`.
-            - Use `option_index` for map, reward, shop, event, rest, selection,
-              and multiplayer-lobby actions.
-            - Use `target_index` only when the latest state marks a card or potion as `requires_target=true`.
-            - Optional `mode` can be `stable` (default) or `instant` (returns without waiting for stable transitions).
-            - Read `target_index_space` and `valid_target_indices` from state to know whether `target_index`
-              refers to `combat.enemies[]` or `combat.players[]`.
-            - `run_console_command` is intentionally excluded from this compact tool.
-        """
+        """Execute one currently available game action through the compact tool surface."""
         normalized = action.strip().lower()
         if normalized == "run_console_command":
             raise RuntimeError("run_console_command is gated separately and must use its own tool when enabled.")
 
-        return sts2.execute_action(
+        action_response = sts2.execute_action(
             normalized,
             card_index=card_index,
             target_index=target_index,
@@ -325,6 +709,22 @@ def create_server(client: Sts2Client | None = None, tool_profile: str | None = N
                 "tool_profile": profile,
             },
         )
+
+        if (
+            not wait_until_actionable_after_instant
+            or mode != "instant"
+            or str(action_response.get("status") or "") != "pending"
+        ):
+            return action_response
+
+        wait_result = _wait_until_actionable_impl(settle_timeout_seconds, mode=mode)
+        enhanced_response = dict(action_response)
+        enhanced_response["transition_state"] = action_response.get("state")
+        enhanced_response["state"] = wait_result.get("state")
+        enhanced_response["available_actions"] = wait_result.get("actions")
+        enhanced_response["actionable"] = _is_actionable_state(wait_result.get("state") or {})
+        enhanced_response["post_action_wait"] = wait_result
+        return enhanced_response
 
     if profile == "full":
         _register_legacy_action_tools(mcp, sts2)
