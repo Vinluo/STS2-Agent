@@ -85,6 +85,8 @@
 
 `POST /action` 支持可选 `mode="instant"`。在该模式下服务端不会阻塞等待稳定态，通常会更快返回 `pending`，并尝试把游戏 `FastMode` 切到 `Instant`（视觉上尽量跳过动画）。
 
+当前默认 action mode 可通过 `GET /action-mode` / `POST /action-mode` 在运行时查询或切换；动作响应也会回显本次实际执行的 `mode`。
+
 ---
 
 ## `GET /health`
@@ -102,7 +104,53 @@
     "mod_version": "0.4.0",
     "protocol_version": "2026-03-11-v1",
     "game_version": "v0.98.2",
-    "status": "ready"
+    "status": "ready",
+    "default_action_mode": "stable"
+  }
+}
+```
+
+---
+
+## `GET /action-mode`
+
+返回当前默认 action mode 与支持的模式列表。
+
+### 响应示例
+
+```json
+{
+  "ok": true,
+  "request_id": "req_20260320_120000_1234",
+  "data": {
+    "default_action_mode": "instant",
+    "supported_modes": ["stable", "instant"]
+  }
+}
+```
+
+---
+
+## `POST /action-mode`
+
+运行时切换默认 action mode，不需要重启游戏进程。
+
+### 请求示例
+
+```json
+{
+  "mode": "instant"
+}
+```
+
+### 响应示例
+
+```json
+{
+  "ok": true,
+  "request_id": "req_20260320_120100_1234",
+  "data": {
+    "default_action_mode": "instant"
   }
 }
 ```
@@ -850,6 +898,7 @@
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `action` | string | 执行的动作名 |
+| `mode` | string | 本次动作实际采用的执行模式：`stable` 或 `instant` |
 | `status` | string | `"completed"` 或 `"pending"` |
 | `stable` | boolean | 状态是否已稳定 |
 | `message` | string | 人类可读的结果描述 |

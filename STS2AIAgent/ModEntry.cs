@@ -1,6 +1,8 @@
 using System.Threading;
+using HarmonyLib;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Modding;
+using STS2AIAgent.DebugConsole;
 using STS2AIAgent.Game;
 using STS2AIAgent.Server;
 
@@ -11,16 +13,29 @@ public static class ModEntry
 {
     private const string LogPrefix = "[STS2AIAgent]";
 
+    private static int _patchesApplied;
     private static int _shutdownHooksRegistered;
 
     public static void Initialize()
     {
         Log.Info($"{LogPrefix} Initializing");
+        ApplyPatches();
         RegisterShutdownHooks();
         GameThread.Initialize();
+        DevConsoleCommandRegistrar.TryRegisterExistingConsole();
         GameEventService.Instance.Start();
         HttpServer.Instance.Start();
         Log.Info($"{LogPrefix} Ready");
+    }
+
+    private static void ApplyPatches()
+    {
+        if (Interlocked.Exchange(ref _patchesApplied, 1) != 0)
+        {
+            return;
+        }
+
+        new Harmony("STS2AIAgent").PatchAll(typeof(ModEntry).Assembly);
     }
 
     private static void RegisterShutdownHooks()

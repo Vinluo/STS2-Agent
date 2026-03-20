@@ -25,6 +25,8 @@ class DummyClient:
         self._states = list(states)
         self._event = event
         self.wait_calls = 0
+        self.wait_timeouts: list[float] = []
+        self.last_execute_action: dict | None = None
 
     def get_health(self) -> dict:
         return {"ok": True}
@@ -39,7 +41,35 @@ class DummyClient:
 
     def wait_for_event(self, *, event_names=None, timeout=0.0) -> dict | None:
         self.wait_calls += 1
+        self.wait_timeouts.append(float(timeout))
         return self._event
+
+    def execute_action(
+        self,
+        action: str,
+        *,
+        card_index=None,
+        target_index=None,
+        option_index=None,
+        mode=None,
+        client_context=None,
+    ) -> dict:
+        self.last_execute_action = {
+            "action": action,
+            "card_index": card_index,
+            "target_index": target_index,
+            "option_index": option_index,
+            "mode": mode,
+            "client_context": client_context,
+        }
+        return {
+            "action": action,
+            "mode": mode,
+            "status": "pending",
+            "stable": False,
+            "message": "Action queued but state is still transitioning.",
+            "state": {"available_actions": []},
+        }
 
 
 class FakeSocket:
@@ -167,6 +197,53 @@ class WaitBehaviorTests(unittest.TestCase):
 
         self.assertEqual(result["source"], "polling")
         self.assertEqual(result["state"]["available_actions"], ["proceed"])
+
+    def test_wait_until_actionable_instant_uses_short_event_window(self) -> None:
+        clock = FakeClock()
+        client = DummyClient(
+            states=[
+                {"available_actions": []},
+                {"available_actions": []},
+                {"available_actions": ["proceed"]},
+            ]
+        )
+        server = create_server(client=client)
+        tool = asyncio.run(server.get_tool("wait_until_actionable"))
+
+        with patch("sts2_mcp.server.time.monotonic", new=clock.monotonic):
+            with patch("sts2_mcp.server.time.sleep", new=clock.sleep):
+                result = tool.fn(timeout_seconds=5.0, mode="instant")
+
+        self.assertEqual(result["source"], "polling")
+        self.assertEqual(result["mode"], "instant")
+        self.assertAlmostEqual(client.wait_timeouts[0], 0.6, places=2)
+        self.assertEqual(result["state"]["available_actions"], ["proceed"])
+
+    def test_act_instant_pending_auto_waits_for_actionable_state(self) -> None:
+        clock = FakeClock()
+        client = DummyClient(
+            states=[
+                {"available_actions": []},
+                {"available_actions": []},
+                {"available_actions": ["proceed"]},
+            ]
+        )
+        server = create_server(client=client)
+        tool = asyncio.run(server.get_tool("act"))
+
+        with patch("sts2_mcp.server.time.monotonic", new=clock.monotonic):
+            with patch("sts2_mcp.server.time.sleep", new=clock.sleep):
+                result = tool.fn(action="open_character_select", mode="instant")
+
+        self.assertEqual(client.last_execute_action["mode"], "instant")
+        self.assertEqual(result["status"], "pending")
+        self.assertFalse(result["stable"])
+        self.assertTrue(result["actionable"])
+        self.assertEqual(result["state"]["available_actions"], ["proceed"])
+        self.assertEqual(result["transition_state"]["available_actions"], [])
+        self.assertEqual(result["post_action_wait"]["source"], "polling")
+        self.assertEqual(result["post_action_wait"]["mode"], "instant")
+        self.assertAlmostEqual(client.wait_timeouts[0], 0.6, places=2)
 
 
 if __name__ == "__main__":

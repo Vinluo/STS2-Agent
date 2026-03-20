@@ -55,7 +55,7 @@ internal static class GameActionService
     private const string InstantExecutionMode = "instant";
     private const string ActionModeEnvironmentVariable = "STS2_ACTION_MODE";
     private static readonly AsyncLocal<string?> ExecutionModeScope = new();
-    private static readonly string DefaultExecutionMode = ResolveDefaultExecutionMode();
+    private static string _defaultExecutionMode = ResolveDefaultExecutionMode();
     private static FastModeType? _fastModeSnapshot;
     private static bool _fastModeOverrideActive;
 
@@ -131,20 +131,10 @@ internal static class GameActionService
     {
         if (string.IsNullOrWhiteSpace(requestedMode))
         {
-            return DefaultExecutionMode;
+            return _defaultExecutionMode;
         }
 
-        var normalized = requestedMode.Trim().ToLowerInvariant();
-        if (string.Equals(normalized, StableExecutionMode, StringComparison.Ordinal) ||
-            string.Equals(normalized, InstantExecutionMode, StringComparison.Ordinal))
-        {
-            return normalized;
-        }
-
-        throw new ApiException(400, "invalid_request", "mode must be either 'stable' or 'instant'.", new
-        {
-            mode = requestedMode
-        });
+        return NormalizeExecutionMode(requestedMode, errorCode: "invalid_request");
     }
 
     private static string ResolveDefaultExecutionMode()
@@ -155,21 +145,54 @@ internal static class GameActionService
             return StableExecutionMode;
         }
 
-        var normalized = rawMode.Trim().ToLowerInvariant();
+        try
+        {
+            return NormalizeExecutionMode(rawMode, errorCode: "invalid_environment");
+        }
+        catch (ApiException)
+        {
+            Log.Warn($"[STS2AIAgent] Ignoring invalid {ActionModeEnvironmentVariable}='{rawMode}'. Falling back to '{StableExecutionMode}'.");
+            return StableExecutionMode;
+        }
+    }
+
+    private static string NormalizeExecutionMode(string mode, string errorCode)
+    {
+        var normalized = mode.Trim().ToLowerInvariant();
         if (string.Equals(normalized, StableExecutionMode, StringComparison.Ordinal) ||
             string.Equals(normalized, InstantExecutionMode, StringComparison.Ordinal))
         {
             return normalized;
         }
 
-        Log.Warn($"[STS2AIAgent] Ignoring invalid {ActionModeEnvironmentVariable}='{rawMode}'. Falling back to '{StableExecutionMode}'.");
-        return StableExecutionMode;
+        throw new ApiException(400, errorCode, "mode must be either 'stable' or 'instant'.", new
+        {
+            mode
+        });
     }
 
     private static bool IsInstantExecutionMode()
     {
-        var mode = ExecutionModeScope.Value ?? DefaultExecutionMode;
+        var mode = ExecutionModeScope.Value ?? _defaultExecutionMode;
         return string.Equals(mode, InstantExecutionMode, StringComparison.Ordinal);
+    }
+
+    internal static string GetCurrentExecutionMode()
+    {
+        return ExecutionModeScope.Value ?? _defaultExecutionMode;
+    }
+
+    internal static string GetDefaultExecutionMode()
+    {
+        return _defaultExecutionMode;
+    }
+
+    internal static string SetDefaultExecutionMode(string mode)
+    {
+        var normalized = NormalizeExecutionMode(mode, errorCode: "invalid_request");
+        _defaultExecutionMode = normalized;
+        Log.Info($"[STS2AIAgent] Default action mode changed to '{normalized}'.");
+        return normalized;
     }
 
     private static DateTime BuildDeadline(TimeSpan timeout)
@@ -1448,8 +1471,12 @@ internal static class GameActionService
         var deadline = BuildDeadline(timeout);
         var attemptedRewardButtons = new HashSet<ulong>();
 
-        while (DateTime.UtcNow < deadline)
+        // Instant mode uses a zero-length wait budget, but reward actions still need one
+        // execution pass so the underlying click is actually issued.
+        var firstPass = true;
+        while (firstPass || DateTime.UtcNow < deadline)
         {
+            firstPass = false;
             var currentScreen = ActiveScreenContext.Instance.GetCurrentScreen();
 
             if (currentScreen is NCardRewardSelectionScreen cardRewardScreen)
@@ -3010,6 +3037,11 @@ internal static class GameActionService
             });
         }
 
+        if (TryHandleInternalConsoleCommand(command, out var internalResponse))
+        {
+            return internalResponse;
+        }
+
         NDevConsole console;
         try
         {
@@ -3078,11 +3110,54 @@ internal static class GameActionService
         return IsStableScreenState(ActiveScreenContext.Instance.GetCurrentScreen(), allowMapScreen: true);
     }
 
-    private static DevConsole? GetDevConsoleCore(NDevConsole console)
+    private static bool TryHandleInternalConsoleCommand(string command, out ActionResponsePayload response)
+    {
+        var tokens = command
+            .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        if (tokens.Length == 0)
+        {
+            response = new ActionResponsePayload();
+            return false;
+        }
+
+        if (!string.Equals(tokens[0], "sts2_action_mode", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(tokens[0], "sts2.mode", StringComparison.OrdinalIgnoreCase))
+        {
+            response = new ActionResponsePayload();
+            return false;
+        }
+
+        if (tokens.Length == 1)
+        {
+            response = new ActionResponsePayload
+            {
+                action = "run_console_command",
+                status = "completed",
+                stable = true,
+                message = $"Current default action mode: {GetDefaultExecutionMode()}",
+                state = GameStateService.BuildStatePayload()
+            };
+            return true;
+        }
+
+        var mode = SetDefaultExecutionMode(tokens[1]);
+        response = new ActionResponsePayload
+        {
+            action = "run_console_command",
+            status = "completed",
+            stable = true,
+            message = $"Default action mode set to {mode}.",
+            state = GameStateService.BuildStatePayload()
+        };
+        return true;
+    }
+
+    private static MegaCrit.Sts2.Core.DevConsole.DevConsole? GetDevConsoleCore(NDevConsole console)
     {
         const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
         var field = typeof(NDevConsole).GetField("_devConsole", flags);
-        return field?.GetValue(console) as DevConsole;
+        return field?.GetValue(console) as MegaCrit.Sts2.Core.DevConsole.DevConsole;
     }
 
     private static bool AreDebugActionsEnabled()
@@ -4110,6 +4185,8 @@ internal sealed class ActionResponsePayload
 {
     public string action { get; init; } = string.Empty;
 
+    public string mode { get; init; } = GameActionService.GetCurrentExecutionMode();
+
     public string status { get; init; } = "failed";
 
     public bool stable { get; init; }
@@ -4118,4 +4195,3 @@ internal sealed class ActionResponsePayload
 
     public GameStatePayload state { get; init; } = new();
 }
-

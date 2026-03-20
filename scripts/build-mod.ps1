@@ -38,6 +38,7 @@ $buildOutputDir = Join-Path $ProjectRoot "STS2AIAgent/bin/$Configuration/net9.0"
 $stagingDir = Join-Path $ProjectRoot "build/mods/$modName"
 $modsDir = Join-Path $GameRoot "mods"
 $manifestSource = Join-Path $ProjectRoot "STS2AIAgent/mod_manifest.json"
+$manifestTarget = Join-Path $stagingDir "$modName.json"
 $dllSource = Join-Path $buildOutputDir "$modName.dll"
 $pckOutput = Join-Path $stagingDir "$modName.pck"
 $dllTarget = Join-Path $stagingDir "$modName.dll"
@@ -61,6 +62,8 @@ if (-not (Test-Path $manifestSource)) {
     throw "Manifest not found: $manifestSource"
 }
 
+Copy-Item -Force $manifestSource $manifestTarget
+
 Write-Host "[build-mod] Packing mod_manifest.json into PCK..."
 & $GodotExe --headless --path $builderProjectDir --script $builderScript -- $manifestSource $pckOutput | Out-Host
 if ($LASTEXITCODE -ne 0) {
@@ -75,8 +78,10 @@ Write-Host "[build-mod] Preparing game mods directory..."
 New-Item -ItemType Directory -Force -Path $modsDir | Out-Null
 Copy-Item -Force $dllTarget (Join-Path $modsDir "$modName.dll")
 Copy-Item -Force $pckOutput (Join-Path $modsDir "$modName.pck")
+Copy-Item -Force $manifestTarget (Join-Path $modsDir "$modName.json")
 
 Write-Host "[build-mod] Done."
 Write-Host "[build-mod] Installed files:"
 Write-Host "  $(Join-Path $modsDir "$modName.dll")"
 Write-Host "  $(Join-Path $modsDir "$modName.pck")"
+Write-Host "  $(Join-Path $modsDir "$modName.json")"
